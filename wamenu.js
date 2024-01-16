@@ -1,4 +1,34 @@
 // wamenu.js
+const fs = require('fs');
+
+// {NEW} check number
+const checkSenderInJSON = (jsonFilePath, targetNumber) => {
+  return new Promise((resolve) => {
+    fs.readFile(jsonFilePath, 'utf8', (err, data) => {
+      if (err) {
+        console.error('Произошла ошибка в checkSenderInJSON:', err);
+        resolve(false); 
+        return;
+      }
+
+      try {
+        const jsonData = JSON.parse(data);
+        const numbers = jsonData.numbers;
+
+        const found = numbers.includes(targetNumber);
+        resolve(found);
+      } catch (parseError) {
+        console.error('Ошибка парсинга clientbase.json:', parseError);
+        resolve(false); 
+      }
+    });
+  });
+};
+
+
+const jsonFilePath = 'clientbase.json';
+
+
 async function wasSpecificMessageSentToday(client, chatId, searchText) {
     const chat = await client.getChatById(chatId);
   
@@ -18,12 +48,57 @@ async function wasSpecificMessageSentToday(client, chatId, searchText) {
   }
 
 
+  const addSenderIdToJSON = (jsonFilePath, senderId) => {
+    fs.readFile(jsonFilePath, 'utf8', (err, data) => {
+      if (err) {
+        console.error('Ошибка при чтении clientbase.json в функции записи:', err);
+        return;
+      }
+  
+      try {
+        const jsonData = JSON.parse(data);
+        if (!jsonData.numbers) {
+          jsonData.numbers = [];
+        }
+        jsonData.numbers.push(senderId);
+        fs.writeFile(jsonFilePath, JSON.stringify(jsonData, null, 2), 'utf8', (writeErr) => {
+          if (writeErr) {
+            console.error('Ошибка при записи в clientbase.json:', writeErr);
+          } else {
+            console.log('SenderId добавлен в список номеров в clientbase.json.');
+          }
+        });
+      } catch (parseError) {
+        console.error('Ошибка парсинга clientbase.json:', parseError);
+      }
+    });
+  };
+
+
 async function handleMenu(client, message) {
     const senderId = message.from;
     const msgContent = message.body.toLowerCase().trim();
     const chat = await message.getChat();
 
+    //exclude groups
     if (chat.isGroup) {
+      return;
+    }
+    
+    let OldChat;
+    checkSenderInJSON(jsonFilePath, senderId).then((found) => {
+      OldChat = found;
+        if (found) {
+          console.log(`senderID найден в файле clientbase.json. Клиент ${senderId} не является новым`);
+        } else {
+          console.log(`Номер не найден в файле clientbase.json. Клиент ${senderId} начал чат`);
+        }
+    });
+
+
+    //ignore non-text messages
+    if(message._data.type != "chat"){
+      console.log(`User ${senderId} sent non-text message`)
       return;
     }
 
@@ -33,7 +108,7 @@ async function handleMenu(client, message) {
     const lastBotMsg = fetchedMessageFromBot[0]?.body?.toLowerCase();
     const wasSentToday = await wasSpecificMessageSentToday(client, senderId, menuMessageText.toLowerCase());
 
-    // console.log(`lastbBotMsg: ${lastBotMsg}\nwasSentToday: ${wasSentToday}\nmsgContent: ${msgContent}\nisGreetings: ${isGreetings(msgContent)}`)
+    console.log(`lastbBotMsg: ${lastBotMsg}\nwasSentToday: ${wasSentToday}\nmsgContent: ${msgContent}\nisGreetings: ${isGreetings(msgContent)}`)
     
     // Если вообще нет наших сообщений, то дальше код не вести вообще
     if (lastBotMsg === menuMessageText.toLowerCase()) {
@@ -70,21 +145,37 @@ async function handleMenu(client, message) {
           await client.sendMessage(senderId, 'Напишите Ваше ФИО и дату рождения полностью, администратор предложит Вам время записи');
       }
     }
+
+
     else{
-        if (!lastBotMsg){
-          if (!msgContent){
-            await client.sendMessage(senderId, menuMessageText);
-            console.log(`Empty msgContent ${senderId}\nLastBotMSG: ${lastBotMsg}\n-----------`);
+        if ((!lastBotMsg && OldChat == false) || (lastBotMsg && isGreetings(msgContent) && !lastBotMsg.trim().includes("здравствуйте") && !wasSentToday)){
+          
+          if(lastBotMsg && isGreetings(msgContent) && !lastBotMsg.trim().includes("здравствуйте") && !wasSentToday){
+            console.log(`Greeted, we did not initiated, today first time: ${senderId}`);
           }
-          if (isGreetings(msgContent)) {
+
+          if (!msgContent || isGreetings(msgContent)){
+
             await client.sendMessage(senderId, menuMessageText);
-            console.log(`Greeted last bot message: ${senderId}`);
+
+            if(OldChat == false){
+              addSenderIdToJSON(jsonFilePath, senderId);
+            }
+            
+            if(!msgContent){  
+              console.log(`Empty msgContent ${senderId}\nLastBotMSG: ${lastBotMsg}\n-----------`);
+            }
+
+            else if(isGreetings(msgContent)){
+              console.log(`Greeted last bot message: ${senderId}`);
+            }
+
           }
         }
-        if(isGreetings(msgContent) && !lastBotMsg.trim().includes("здравствуйте") && !wasSentToday){ 
-          await client.sendMessage(senderId, menuMessageText);
-          console.log(`Greeted, we did not initiated, today first time: ${senderId}`);
-        }
+        // if(isGreetings(msgContent) && !lastBotMsg.trim().includes("здравствуйте") && !wasSentToday){ 
+        //   await client.sendMessage(senderId, menuMessageText);
+        //   console.log(`Greeted, we did not initiated, today first time: ${senderId}`);
+        // }
     }
 
 }
